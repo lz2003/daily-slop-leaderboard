@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "/Users/lucyzhao/.nvm/versions/node/v26.11.1/bin/node",
+      "runtimeArgs": ["server/index.js", "--dev"],
+      "port": 3000
+    }
+  ]
+}
