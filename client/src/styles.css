@@ -148,3 +148,19 @@ tr.me td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .game-tabs { margin-bottom: 12px; }
 .game-tabs button { font-weight: 600; padding: 6px 16px; }
 .tiles { letter-spacing: 2px; font-size: 1.05rem; white-space: nowrap; }
+
+/* Krillion answers */
+textarea.answers-input { min-height: 140px; }
+.answers { list-style: none; padding: 0; margin: 10px 0 0; }
+.answers li { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px solid var(--border); }
+.answers li:first-child { border-top: 0; }
+.answer-tile { font-size: 1.05rem; line-height: 1.4; }
+.answer-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.answer-prompt { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.answer-text { font-weight: 600; overflow-wrap: anywhere; }
+.answer-others { font-size: 0.78rem; color: var(--muted); }
+.answer-points { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--muted); }
+.answers-toggle { margin-top: 4px; font-size: 0.88rem; }
+.answers-toggle summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+.answers-toggle[open] { min-width: 260px; }
+.table-wrap td { vertical-align: top; }

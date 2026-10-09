@@ -9,7 +9,7 @@ import ResultPreview from '../components/ResultPreview.jsx';
 import { useToast } from '../components/Toast.jsx';
 
 // Parse the pasted text (debounced) so the player can see what we picked up before submitting.
-function usePreview(gameId, text) {
+function usePreview(gameId, text, answers) {
   const [preview, setPreview] = useState(null);
   useEffect(() => {
     if (!text.trim()) {
@@ -18,12 +18,12 @@ function usePreview(gameId, text) {
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      api('/api/results/preview', { method: 'POST', body: { game: gameId, text } })
+      api('/api/results/preview', { method: 'POST', body: { game: gameId, text, answers } })
         .then((p) => !cancelled && setPreview({ ok: true, ...p }))
         .catch((err) => !cancelled && setPreview({ ok: false, error: err.message }));
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [gameId, text]);
+  }, [gameId, text, answers]);
   return preview;
 }
 
@@ -36,11 +36,12 @@ export default function SubmitPage() {
   const [gameId, setGameId] = useState(currentGame.id);
   const [pickedDate, setPickedDate] = useState(today);
   const [text, setText] = useState('');
+  const [answers, setAnswers] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const game = gameById(gameId);
-  const preview = usePreview(gameId, text);
+  const preview = usePreview(gameId, text, game.answersInput ? answers : '');
   // Some games' share text says which day it was (e.g. Krillion's dive number).
   const date = game.datedByResult ? (preview?.ok ? preview.date : '') : pickedDate;
   const isFuture = !!date && date > today;
@@ -55,7 +56,7 @@ export default function SubmitPage() {
     setBusy(true);
     setError('');
     try {
-      const r = await api('/api/results', { method: 'POST', body: { game: gameId, text, date } });
+      const r = await api('/api/results', { method: 'POST', body: { game: gameId, text, date, answers: game.answersInput ? answers : undefined } });
       toast(`Saved — ${fmt(r.score)} ${game.scoreLabel}!`);
       setPrefs((p) => ({ ...p, game: gameId, period: r.date === today ? 'today' : 'all' }));
       navigate('/');
@@ -77,12 +78,21 @@ export default function SubmitPage() {
           </div>
         </div>
       </div>
-      <GameTabs games={games} value={gameId} onChange={(id) => { setGameId(id); setText(''); setError(''); }} />
+      <GameTabs games={games} value={gameId} onChange={(id) => { setGameId(id); setText(''); setAnswers(''); setError(''); }} />
       <div className="grid-2">
         <form className="card" onSubmit={handleSubmit}>
           <label htmlFor="t">Share text</label>
           <textarea id="t" autoFocus required placeholder={game.placeholder} value={text}
             onChange={(e) => setText(e.target.value)} />
+
+          {game.answersInput && (
+            <>
+              <label htmlFor="a">{game.answersInput.label}</label>
+              <textarea id="a" className="answers-input" placeholder={game.answersInput.placeholder} value={answers}
+                onChange={(e) => setAnswers(e.target.value)} />
+              <div className="muted small" style={{ marginTop: 4 }}>{game.answersInput.help}</div>
+            </>
+          )}
 
           <label htmlFor={game.datedByResult ? undefined : 'd'}>Day played</label>
           {game.datedByResult ? (

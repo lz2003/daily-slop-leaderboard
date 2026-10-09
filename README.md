@@ -6,7 +6,7 @@ Make an account, paste your daily game result, and compare scores within your fr
 
 Supported games:
 - [RNGdle](https://www.rngdle.com/) — score = total EP. Players pick the day they played.
-- [Krillion](https://krillion.io/) — score = dive points (max 700). The day comes from the dive number in the share text; only daily dives count (not archive, unlimited or themed packs).
+- [Krillion](https://krillion.io/) — score = dive points (max 700). The day comes from the dive number in the share text; only daily dives count (not archive, unlimited or themed packs). Players can optionally paste their answers too (the "the catch" list from the results page); they're checked against the share's tiles, and other players' answers stay hidden until the dive is over or you've submitted that dive yourself.
 
 ## Running
 
@@ -50,4 +50,4 @@ test/app.test.js     parser + API tests (node:test)
 
 ## Adding a game
 
-Create `server/games/<id>.js` exporting `{ id, name, url, scoreLabel, higherIsBetter, placeholder, parse(text), summarize(details) }`, where `parse` returns `{ score, details }` or throws a friendly error, and add it to `server/games/index.js`. If the share text identifies the day, also return `date` from `parse` and set `datedByResult: true`. On the client, add the game's display pieces (`ResultCell`, `Preview`, `feedNote`) to `client/src/games.jsx`; game tabs appear automatically.
+Create `server/games/<id>.js` exporting `{ id, name, url, scoreLabel, higherIsBetter, placeholder, parse(text), summarize(details) }`, where `parse` returns `{ score, details }` or throws a friendly error, and add it to `server/games/index.js`. If the share text identifies the day, also return `date` from `parse` and set `datedByResult: true`. To accept a second pasted text (like Krillion's answers), describe it in `answersInput`; `parse(text, { answers })` receives it. On the client, add the game's display pieces (`ResultCell`, `Preview`, `feedNote`) to `client/src/games.jsx`; game tabs appear automatically.

@@ -80,6 +80,110 @@ test('rejects non-daily Krillion shares and bad scores', () => {
   assert.throws(() => krillion.parse(SAMPLE), /Krillion/);
 });
 
+// Build copied "the catch" text for the given round points.
+function answersText(points, extra = {}) {
+  return points.map((p, k) => [
+    String(k + 1),
+    `Prompt ${k + 1}`,
+    extra.answers?.[k] ?? `Answer ${k + 1}`,
+    ...(p ? [`${(k + 1) * 1000} other players chose this`] : []),
+    `${p}+`,
+    ...(extra.expanded === k ? ['Sorry 33,246', 'Baby 12,000', '2', 'other stuff'] : []),
+  ].join('\n\n')).join('\n');
+}
+
+const USER_SAMPLE_ANSWERS = `1
+
+Name a Justin Bieber song
+
+Sorry
+
+33,246 other players chose this
+10+
+2
+
+Name an animal named after another animal (like seahorse)
+
+Tarantula hawk
+
+3,493 other players chose this
+60+
+3
+
+Name a Twitch streamer with more than 500k followers
+
+CDawg
+
+1,715 other players chose this
+60+
+4
+
+Name a country whose flag has both green and red
+
+Bolivia
+
+5,948 other players chose this
+60+
+5
+
+Name a city in the UK (towns count too)
+
+Birmingham
+
+29,432 other players chose this
+10+
+6
+
+Name an email service (like Gmail)
+
+Zoho Mail
+
+3,988 other players chose this
+60+
+7
+
+Name a type of camera (not brands)
+
+Infrared camera
+
+15,749 other players chose this
+60+`;
+
+test('parses copied Krillion answers and matches them to the tiles', () => {
+  const r = krillion.parse('Krillion #86 🦐\n320\n\n🫧🦑🦑🦑🫧🦑🦑', { answers: USER_SAMPLE_ANSWERS });
+  assert.strictEqual(r.details.answers.length, 7);
+  assert.deepStrictEqual(r.details.answers[1], {
+    round: 2,
+    prompt: 'Name an animal named after another animal (like seahorse)',
+    answer: 'Tarantula hawk',
+    recognized: true,
+    others: 3493,
+    points: 60,
+    tile: 'rare',
+  });
+  assert.deepStrictEqual(r.details.answers.map((a) => a.points), [10, 60, 60, 60, 10, 60, 60]);
+  // no answers pasted → no answers stored
+  assert.strictEqual(krillion.parse('Krillion #86 🦐\n320\n\n🫧🦑🦑🦑🫧🦑🦑', { answers: '  ' }).details.answers, undefined);
+});
+
+test('Krillion answers: misses, quoted answers, numeric answers and expanded rounds', () => {
+  const text = answersText([0, 30, 100, 10, 10, 15, 85], { answers: ['—', '"wobbegong"', '2'], expanded: 3 });
+  const r = krillion.parse('Krillion #86 🦐\n250\n\n⬛🐟🌟🫧🫧🤡🏮', { answers: text });
+  const a = r.details.answers;
+  assert.deepStrictEqual(a.map((x) => x.round), [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepStrictEqual([a[0].answer, a[0].recognized, a[0].others, a[0].tile], [null, false, null, 'miss']);
+  assert.deepStrictEqual([a[1].answer, a[1].recognized], ['wobbegong', false]);
+  assert.strictEqual(a[2].answer, '2');
+  assert.strictEqual(a[4].prompt, 'Prompt 5'); // the expanded round 4 sheet was skipped
+});
+
+test('Krillion answers must belong to the same dive', () => {
+  assert.throws(() => krillion.parse('Krillion #86 🦐\n320\n\n🫧🦑🦑🦑🫧🦑🐟', { answers: USER_SAMPLE_ANSWERS }), /Round 7.*same dive/);
+  assert.throws(() => krillion.parse('Krillion #86 🦐\n70\n\n🫧🦑', { answers: USER_SAMPLE_ANSWERS }), /7 rounds but your result has 2 tiles/);
+  assert.throws(() => krillion.parse('Krillion #86 🦐\n10\n\n🫧', { answers: 'just some text' }), /any rounds/);
+  assert.throws(() => krillion.parse('Krillion #86 🦐\n10\n\n🫧', { answers: '1\nPrompt only' }), /round 1/);
+});
+
 // ---------- API ----------
 
 // A fetch wrapper that keeps its own session cookie, like a separate browser.
@@ -200,6 +304,38 @@ test('full flow: accounts, groups, results, leaderboards', async () => {
     lb = (await alice('GET', `/api/leaderboard?game=rngdle&group=${g.id}`)).body;
     assert.deepStrictEqual(lb.rows.map((r) => [r.username, r.total]), [['alice', 350], ['bob', 200]]);
     assert.strictEqual((await alice('GET', '/api/games')).body.games.find((x) => x.id === 'krillion').datedByResult, true);
+
+    // Krillion answers are hidden from group-mates until the dive is over or they've played it
+    const todayK = krillion.currentDate();
+    const diveFor = (date) => Math.round((Date.parse(date) - Date.parse('2026-07-16')) / 86400000) + 1;
+    const todayDive = diveFor(todayK);
+    const withAnswers = (c, dive) => c('POST', '/api/results', {
+      game: 'krillion',
+      text: `Krillion #${dive} 🦐\n320\n\n🫧🦑🦑🦑🫧🦑🦑`,
+      answers: USER_SAMPLE_ANSWERS,
+    });
+    assert.strictEqual((await withAnswers(alice, todayDive)).status, 200);
+    const aliceToday = async (viewer) => (await viewer('GET',
+      `/api/leaderboard?game=krillion&group=${g.id}&from=${todayK}&to=${todayK}`)).body.rows
+      .find((r) => r.username === 'alice').result.details;
+    let seen = await aliceToday(bob);
+    assert.strictEqual(seen.answers, undefined);
+    assert.strictEqual(seen.answersHidden, true);
+    assert.strictEqual((await aliceToday(alice)).answers.length, 7); // always see your own
+    const bobFeed = (await bob('GET', `/api/feed?group=${g.id}`)).body.results.find((r) => r.game === 'krillion' && r.username === 'alice' && r.date === todayK);
+    assert.strictEqual(bobFeed.details.answers, undefined);
+    const bobProfile = (await bob('GET', '/api/users/alice')).body.results.find((r) => r.game === 'krillion' && r.date === todayK);
+    assert.strictEqual(bobProfile.details.answersHidden, true);
+    // once bob plays today's dive (answers or not), he can see alice's
+    assert.strictEqual((await kr(bob, todayDive, 100)).status, 200);
+    assert.strictEqual((await aliceToday(bob)).answers[0].answer, 'Sorry');
+    // past dives are visible even if you didn't play them
+    assert.strictEqual((await withAnswers(alice, todayDive - 1)).status, 200);
+    const past = (await bob('GET', '/api/users/alice')).body.results.find((r) => r.game === 'krillion' && r.details.dive === todayDive - 1);
+    assert.strictEqual(past.details.answers.length, 7);
+    // mismatched answers are rejected outright
+    res = await alice('POST', '/api/results', { game: 'krillion', text: `Krillion #${todayDive - 2} 🦐\n5\n\n⬛`, answers: USER_SAMPLE_ANSWERS });
+    assert.strictEqual(res.status, 400);
 
     // leaving: last member out deletes the group
     await bob('POST', `/api/groups/${g.id}/leave`, {});

@@ -35,6 +35,45 @@ const KRILLION_TILE_NAMES = {
   plankton: 'Plankton', tooclever: 'Too Clever', schooler: 'Schooler', rare: 'Rare',
   deepcut: 'Deep Cut', krillion: 'One in a Krillion', miss: 'Miss',
 };
+const KRILLION_TILE_EMOJI = {
+  plankton: '🫧', tooclever: '🤡', schooler: '🐟', rare: '🦑', deepcut: '🏮', krillion: '🌟', miss: '⬛',
+};
+
+// A player's seven prompts and what they answered.
+function KrillionAnswers({ answers }) {
+  return (
+    <ol className="answers">
+      {answers.map((a) => (
+        <li key={a.round}>
+          <span className="answer-tile" title={KRILLION_TILE_NAMES[a.tile] || ''}>{KRILLION_TILE_EMOJI[a.tile] || '·'}</span>
+          <span className="answer-body">
+            <span className="answer-prompt">{a.prompt}</span>
+            <span className="answer-text">
+              {a.answer === null ? <em className="muted">no answer</em> : a.recognized ? a.answer : <em>"{a.answer}"</em>}
+            </span>
+            {a.others !== null && (
+              <span className="answer-others">{a.others.toLocaleString()} other{a.others === 1 ? '' : 's'} chose this</span>
+            )}
+          </span>
+          <span className="answer-points">{a.points}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function KrillionAnswersToggle({ details: d }) {
+  if (d.answersHidden) {
+    return <span className="sub">🙈 Answers hidden until you've played this dive</span>;
+  }
+  if (!d.answers) return null;
+  return (
+    <details className="answers-toggle">
+      <summary>Answers</summary>
+      <KrillionAnswers answers={d.answers} />
+    </details>
+  );
+}
 
 const krillion = {
   ResultCell({ details: d }) {
@@ -42,6 +81,7 @@ const krillion = {
       <>
         <span className="tiles">{d.emojis}</span>
         <span className="sub">Dive #{d.dive}</span>
+        <KrillionAnswersToggle details={d} />
       </>
     );
   },
@@ -55,6 +95,7 @@ const krillion = {
         <div className="small muted">
           {Object.entries(counts).map(([t, n]) => `${n}× ${KRILLION_TILE_NAMES[t] || t}`).join(' · ')}
         </div>
+        {d.answers && <KrillionAnswers answers={d.answers} />}
       </>
     );
   },

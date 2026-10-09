@@ -79,7 +79,7 @@ function serveStatic(dir) {
 function createApp(db, { frontend } = {}) {
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '20kb' }));
+  app.use(express.json({ limit: '64kb' }));
   // Express 5 leaves req.body undefined when there is no body.
   app.use((req, res, next) => {
     req.body ??= {};
@@ -129,8 +129,9 @@ function createApp(db, { frontend } = {}) {
     sharesGroup: db.prepare(`
       SELECT 1 FROM group_members a JOIN group_members b ON a.group_id = b.group_id
       WHERE a.user_id = ? AND b.user_id = ? LIMIT 1`),
+    playedDays: db.prepare('SELECT game, play_date FROM results WHERE user_id = ?'),
     userResults: db.prepare(`
-      SELECT r.id, r.game, r.play_date, r.score, r.details, r.created_at
+      SELECT r.id, r.user_id, r.game, r.play_date, r.score, r.details, r.created_at
       FROM results r WHERE r.user_id = ? AND (@game IS NULL OR r.game = @game)
       ORDER BY r.play_date DESC LIMIT 365`),
   };
@@ -172,8 +173,31 @@ function createApp(db, { frontend } = {}) {
     });
   }
 
-  function formatResult(row, game) {
-    const details = JSON.parse(row.details);
+  // A game's own "today" (e.g. Krillion's day rolls over in New York), defaulting to UTC.
+  const gameToday = (game) => (game?.currentDate ? game.currentDate() : utcDate());
+
+  /**
+   * Returns a function deciding whether `viewer` may see the answers in a result. Answers are
+   * spoilers: other players' answers stay hidden until the day is over, or until the viewer has
+   * submitted their own result for that game and day.
+   */
+  function answersVisibility(viewer) {
+    let played = null;
+    return (row, game) => {
+      if (viewer && row.user_id === viewer.id) return true;
+      if (row.play_date < gameToday(game)) return true;
+      if (!viewer) return false;
+      played ??= new Set(q.playedDays.all(viewer.id).map((p) => `${p.game}|${p.play_date}`));
+      return played.has(`${row.game}|${row.play_date}`);
+    };
+  }
+
+  function formatResult(row, game, canSeeAnswers = () => false) {
+    let details = JSON.parse(row.details);
+    if (details.answers && !canSeeAnswers(row, game)) {
+      const { answers, ...rest } = details;
+      details = { ...rest, answersHidden: true };
+    }
     return {
       id: row.id,
       game: row.game,
@@ -274,7 +298,7 @@ function createApp(db, { frontend } = {}) {
     const game = requireGame(req.body.game);
     let parsed;
     try {
-      parsed = game.parse(req.body.text);
+      parsed = game.parse(req.body.text, { answers: req.body.answers });
     } catch (err) {
       throw new HttpError(400, err.message);
     }
@@ -303,16 +327,17 @@ function createApp(db, { frontend } = {}) {
     const user = requireUser(req);
     const game = requireGame(req.query.game);
     const row = q.resultFor.get(user.id, game.id, requirePlayableDate(req.query.date));
-    return { result: row ? formatResult({ ...row, username: user.username }, game) : null };
+    return { result: row ? formatResult({ ...row, username: user.username }, game, () => true) : null };
   }));
 
   app.post('/api/results', h((req) => {
     const user = requireUser(req);
     const game = requireGame(req.body.game);
     const text = String(req.body.text || '');
+    const answers = String(req.body.answers || '');
     let parsed;
     try {
-      parsed = game.parse(text);
+      parsed = game.parse(text, { answers });
     } catch (err) {
       throw new HttpError(400, err.message);
     }
@@ -329,7 +354,7 @@ function createApp(db, { frontend } = {}) {
         play_date: date,
         score: parsed.score,
         details: JSON.stringify(parsed.details),
-        raw_text: text.slice(0, 4000),
+        raw_text: (answers.trim() ? `${text}\n\n----- answers -----\n${answers}` : text).slice(0, 12000),
       });
     } catch (err) {
       // Lost a race with a concurrent submit for the same day.
@@ -348,9 +373,10 @@ function createApp(db, { frontend } = {}) {
     }
     const game = req.query.game ? requireGame(req.query.game).id : null;
     const rows = q.userResults.all({ game }, user.id);
+    const canSee = answersVisibility(me);
     return {
       user: { id: user.id, username: user.username, createdAt: user.created_at },
-      results: rows.map((r) => formatResult(r, gamesRegistry.byId[r.game])),
+      results: rows.map((r) => formatResult(r, gamesRegistry.byId[r.game], canSee)),
     };
   }));
 
@@ -381,12 +407,13 @@ function createApp(db, { frontend } = {}) {
     let dayResults = null;
     if (from === to) {
       dayResults = {};
+      const canSee = answersVisibility(req.user);
       db.prepare(`
         SELECT r.*, u.username FROM results r
         JOIN users u ON u.id = r.user_id
         JOIN group_members m ON m.user_id = r.user_id AND m.group_id = ?
         WHERE r.game = ? AND r.play_date = ?`).all(groupId, game.id, from)
-        .forEach((r) => { dayResults[r.username] = formatResult(r, game); });
+        .forEach((r) => { dayResults[r.username] = formatResult(r, game, canSee); });
     }
 
     return {
@@ -410,7 +437,8 @@ function createApp(db, { frontend } = {}) {
       JOIN users u ON u.id = r.user_id
       JOIN group_members m ON m.user_id = r.user_id AND m.group_id = ?
       ORDER BY r.created_at DESC, r.id DESC LIMIT 20`).all(groupId);
-    return { results: rows.map((r) => formatResult(r, gamesRegistry.byId[r.game])) };
+    const canSee = answersVisibility(req.user);
+    return { results: rows.map((r) => formatResult(r, gamesRegistry.byId[r.game], canSee)) };
   }));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
